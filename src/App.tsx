@@ -126,6 +126,31 @@ const SLOW_STEP = 0.2; // s between the opening rings
 const SLOW_RINGS = 5; // rings over which the pace eases from SLOW_STEP to DIST_STEP
 const BAND_JITTER = 0.03; // s of scatter within a ring, so it does not pop as one unit
 
+// Stragglers. A ring leaving as one clean block reads as machinery, so some
+// butterflies hesitate and go late. This is weighted by distance on purpose:
+// close to the click the alarm is contact and everything goes at once, but
+// further out it is second-hand panic, and second-hand panic is uneven. Hence
+// the ramp — hesitation is rare in the first rings and common by LAG_RAMP.
+//
+// The lag is squared, so most hesitations are brief and only a few butterflies
+// hang back noticeably. A flat random would smear the whole ring instead of
+// leaving a crisp front with a few laggards behind it.
+const LAG_CHANCE = 0.3; // peak fraction of a ring that hesitates
+const LAG_MAX = 0.2; // s of hesitation at most, before WAVE_SCALE
+const LAG_RAMP = 6; // rings over which hesitation reaches full strength
+
+// TESTING KNOB — stretches phase 2 only, so the outward wave can be watched
+// ring by ring. Phase 1 is left alone: the poke already has its own cadence dial
+// in POKE_STEP, and scaling it as well was just doing the same job twice.
+//
+// It multiplies only the outward progression, not the moment phase 2 begins, so
+// the wave still starts the instant the poke finishes rather than leaving a dead
+// gap. The flight itself (FD) is not scaled either — each butterfly leaves at
+// normal speed and it is the spacing between launches that opens up.
+//
+// 1 = shipping speed.
+const WAVE_SCALE = 3;
+
 const STARTLE_AMP = 0.4; // the whole swarm stirs the moment the click lands
 const ALARM_AMP = 0.92; // and beats hard once its own departure is imminent
 const ALARM_LEAD = 0.6; // s of hard beating before this one actually leaves
@@ -620,10 +645,19 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       let maxDelay = 0;
       for (const b of bfs.current) {
         const depth = back - b.layer;
+
+        // Phase 1 stays crisp — that is contact, and contact is not negotiable.
+        // Only the alarm-driven rings get stragglers.
+        const reluctance = Math.min(1, b.band / LAG_RAMP);
+        const lag =
+          Math.random() < LAG_CHANCE * reluctance
+            ? Math.random() ** 2 * LAG_MAX * reluctance
+            : 0;
+
         const delay =
           b.band < CONTACT_BANDS
             ? ring[b.band] + depth * POKE_STEP
-            : rollStart + (ring[b.band] - edge) + depth * ROLL_LAYER_STEP;
+            : rollStart + (ring[b.band] - edge + depth * ROLL_LAYER_STEP + lag) * WAVE_SCALE;
         b.fStart = t0 + delay + Math.random() * BAND_JITTER;
         if (delay > maxDelay) maxDelay = delay;
       }
