@@ -1,0 +1,23 @@
+node_modules/
+dist/
+build/
+.cache/
+.env*
+.vite/
+vite.config.*.timestamp-*
+*.tsbuildinfo
+*-debug.log*
+logs/
+*.log
+.tmp-*
+
+# Platform-managed agentplat state, not project source. In the
+# client-initiated single-repo workspace layout (make's `Path: "."` spec) the
+# repo root IS the workspace root, so these land inside this repo rather than
+# beside it.
+/.plugins/
+/.opencode-skills/
+
+# Superseded snapshot of a previous iteration. Kept on disk for reference,
+# but git carries the history now, so it is not part of the published source.
+src/App.v1.tsx
