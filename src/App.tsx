@@ -151,8 +151,22 @@ const LAG_RAMP = 6; // rings over which hesitation reaches full strength
 // 1 = shipping speed.
 const WAVE_SCALE = 3;
 
-const STARTLE_AMP = 0.4; // the whole swarm stirs the moment the click lands
-const ALARM_AMP = 0.92; // and beats hard once its own departure is imminent
+// A butterfly winds up in two stages, and both are measured backwards from its
+// own launch rather than from the click. That is the whole trick: the wind-up
+// inherits the BL/DL ordering of the departure for free, so the stirring rolls
+// outward and down through the layers exactly as the dispersion does, instead
+// of the entire swarm twitching at once the instant the click lands.
+//
+//   idle  ->  STARTLE_LEAD before launch: stirs      (STARTLE_AMP)
+//         ->  ALARM_LEAD   before launch: beats hard (ALARM_AMP)
+//         ->  launch
+//
+// STARTLE_LEAD is well ahead of ALARM_LEAD so there is a wide band of stirring
+// butterflies running ahead of the narrower band of hard-beating ones, and both
+// run ahead of the clearing front.
+const STARTLE_AMP = 0.4; // a stir — it has noticed something
+const STARTLE_LEAD = 1.5; // s before its own launch that it first stirs
+const ALARM_AMP = 0.92; // full beat — it is about to go
 const ALARM_LEAD = 0.6; // s of hard beating before this one actually leaves
 const FLY_UP = 2600; // px risen over the full flight
 const FLY_OUT = 620; // px of lateral spread
@@ -742,12 +756,12 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
         if (flying) {
           const el = now - b.fStart;
           if (el < 0) {
-            // Still on the canvas. The click startles the whole swarm at once,
-            // then each one winds up to a hard beat over the last ALARM_LEAD
-            // seconds before its own launch — so there is always a wide band of
-            // agitated butterflies ahead of the clearing front, and the layers
-            // under the fingertip are visibly winding up while the top one goes.
-            const target = el > -ALARM_LEAD ? ALARM_AMP : STARTLE_AMP;
+            // Still on the canvas. Both wind-up stages are relative to this
+            // butterfly's own launch, so the agitation spreads in the same order
+            // the departure does. Anything the wave has not reached yet keeps
+            // breathing at its resting rate.
+            const target =
+              el > -ALARM_LEAD ? ALARM_AMP : el > -STARTLE_LEAD ? STARTLE_AMP : 0;
             b.hover += (target - b.hover) * RISE;
             amp = IDLE_AMP + b.hover * (MAX_AMP - IDLE_AMP);
             b.ph += dt * (IDLE_SPEED + b.hover * (FAST_SPEED - IDLE_SPEED));
