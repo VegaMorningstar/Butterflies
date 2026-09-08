@@ -427,6 +427,55 @@ function makeBody(cfg: Layer): Sprite {
 }
 
 
+// The ground, the vignette and the cursor glow are fixed images that only
+// change when the window does. Evaluating three gradients across the whole
+// canvas every frame costs more than the butterflies in the top layer; baking
+// them once and blitting turns per-pixel gradient maths into a copy.
+// All three are built at device resolution and blitted under an identity
+// transform, so nothing is resampled.
+function makeWash(w: number, h: number, paint: (c: CanvasRenderingContext2D) => void) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, w);
+  c.height = Math.max(1, h);
+  paint(c.getContext('2d')!);
+  return c;
+}
+
+function makeGround(w: number, h: number) {
+  return makeWash(w, h, ctx => {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#101418');
+    g.addColorStop(0.55, '#0b0e12');
+    g.addColorStop(1, '#080a0d');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
+function makeVignette(w: number, h: number) {
+  return makeWash(w, h, ctx => {
+    const g = ctx.createRadialGradient(
+      w * 0.5, h * 0.5, Math.min(w, h) * 0.3,
+      w * 0.5, h * 0.5, Math.max(w, h) * 0.82,
+    );
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,0.5)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
+function makeGlow(r: number) {
+  return makeWash(r * 2, r * 2, ctx => {
+    const g = ctx.createRadialGradient(r, r, 0, r, r, r * 0.95);
+    g.addColorStop(0.0, 'rgba(222, 234, 244, 0.075)');
+    g.addColorStop(0.5, 'rgba(190, 212, 230, 0.026)');
+    g.addColorStop(1.0, 'rgba(160, 190, 214, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, r * 2, r * 2);
+  });
+}
+
 // ─── loading screen ───────────────────────────────────────────────────────────
 function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
   const cvs = useRef<HTMLCanvasElement>(null);
@@ -434,6 +483,9 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
   const wingRef = useRef<Sprite[]>([]);
   const bodyRef = useRef<Sprite[]>([]);
   const deepRef = useRef<Sprite | null>(null);
+  const groundRef = useRef<HTMLCanvasElement | null>(null);
+  const vigRef = useRef<HTMLCanvasElement | null>(null);
+  const glowRef = useRef<HTMLCanvasElement | null>(null);
   const stage = useRef<'idle' | 'fly'>('idle');
   const mouse = useRef({ x: -9999, y: -9999, seen: false });
   const raf = useRef(0);
@@ -521,6 +573,9 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       canvas.height = Math.round(H * d);
       canvas.style.width = `${W}px`;
       canvas.style.height = `${H}px`;
+      groundRef.current = makeGround(canvas.width, canvas.height);
+      vigRef.current = makeVignette(canvas.width, canvas.height);
+      if (!glowRef.current) glowRef.current = makeGlow(Math.round(HOVER_R * d));
       buildGrid();
     };
     onResize();
@@ -605,17 +660,20 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       last = now;
 
       const d = dpr();
-      ctx.setTransform(d, 0, 0, d, 0, 0);
+      const ground = groundRef.current;
+      const vig = vigRef.current;
+      const glow = glowRef.current;
+      if (!ground || !vig || !glow) return;
 
-      // ground
-      const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-      bgGrad.addColorStop(0, '#101418');
-      bgGrad.addColorStop(0.55, '#0b0e12');
-      bgGrad.addColorStop(1, '#080a0d');
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, W, H);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.drawImage(ground, 0, 0);
 
+      // Every butterfly transform is written straight into setTransform below,
+      // so the device scale is folded in here rather than left on the context.
       const flying = stage.current === 'fly';
+      const shadowLayer = LAYERS.map(l => l.shadow);
+      const cull = 120; // px of slack before an off-screen butterfly is skipped
       const mx = mouse.current.x;
       const my = mouse.current.y;
 
@@ -682,6 +740,8 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
         }
 
         if (alpha < 0.012) continue;
+        // Nothing to draw once the flight has carried it off the canvas.
+        if (px < -cull || px > W + cull || py < -cull || py > H + cull) continue;
 
         // fold: 0 = wings flat open, 1 = wings closed over the back
         const fold = amp * (1 - Math.cos(b.ph)) * 0.5;
@@ -690,67 +750,53 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
         // wings rise as they close; the body stays put, so it reads as a hinge
         const lift = -fold * SS * 0.05 * b.sz;
 
+        // Each sprite's transform is translate * rotate * translate(0,lift) *
+        // scale, composed by hand and pushed in one setTransform. The equivalent
+        // save/translate/rotate/scale/restore chain is four state-stack
+        // operations per sprite, and at this butterfly count that is a
+        // measurable slice of the frame on its own.
+        const co = Math.cos(rot);
+        const si = Math.sin(rot);
+        const wa = co * sx * d;
+        const wb = si * sx * d;
+        const wc = -si * sy * d;
+        const wd = co * sy * d;
+        const lx = -si * lift;
+        const ly = co * lift;
+
         // Shadow first, offset in screen space so the direction stays put, then
-        // folded by the same scale as the wings that cast it. Raised butterflies
-        // sit further off the field, so theirs throws wider and softer.
-        if (LAYERS[b.layer].shadow) {
-          ctx.save();
+        // folded by the same scale as the wings that cast it.
+        if (shadowLayer[b.layer]) {
           ctx.globalAlpha = alpha * SHADOW_ALPHA;
-          ctx.translate(px + SHADOW_DX * b.throw_, py + SHADOW_DY * b.throw_);
-          if (rot) ctx.rotate(rot);
-          ctx.translate(0, lift);
-          ctx.scale(sx, sy);
+          const ox2 = px + SHADOW_DX * b.throw_ + lx;
+          const oy2 = py + SHADOW_DY * b.throw_ + ly;
+          ctx.setTransform(wa, wb, wc, wd, ox2 * d, oy2 * d);
           ctx.drawImage(deep.c, deep.ox, deep.oy);
-          ctx.restore();
         }
 
-        ctx.save();
-        ctx.translate(px, py);
-        if (rot) ctx.rotate(rot);
         ctx.globalAlpha = alpha * (1 - fold * 0.16);
 
-        const wing = wings[b.layer];
-        const body = bodies[b.layer];
-
         // wings — one symmetric sprite, squeezed toward the body axis
-        ctx.save();
-        ctx.translate(0, lift);
-        ctx.scale(sx, sy);
+        const wing = wings[b.layer];
+        ctx.setTransform(wa, wb, wc, wd, (px + lx) * d, (py + ly) * d);
         ctx.drawImage(wing.c, wing.ox, wing.oy);
-        ctx.restore();
 
-        // body rides on top, unfolded
-        ctx.save();
-        ctx.scale(b.sz, b.sz);
+        // body rides on top, unfolded, so the fold reads as a hinge
+        const body = bodies[b.layer];
+        const bs = b.sz * d;
+        ctx.setTransform(co * bs, si * bs, -si * bs, co * bs, px * d, py * d);
         ctx.drawImage(body.c, body.ox, body.oy);
-        ctx.restore();
-
-        ctx.restore();
       }
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
 
       // cool spill of light around the cursor
       if (!flying && mouse.current.seen) {
-        const g = ctx.createRadialGradient(mx, my, 0, mx, my, HOVER_R * 0.95);
-        g.addColorStop(0.0, 'rgba(222, 234, 244, 0.075)');
-        g.addColorStop(0.5, 'rgba(190, 212, 230, 0.026)');
-        g.addColorStop(1.0, 'rgba(160, 190, 214, 0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(mx - HOVER_R, my - HOVER_R, HOVER_R * 2, HOVER_R * 2);
+        ctx.drawImage(glow, Math.round((mx - HOVER_R) * d), Math.round((my - HOVER_R) * d));
       }
 
-      // vignette
-      const vg = ctx.createRadialGradient(
-        W * 0.5,
-        H * 0.5,
-        Math.min(W, H) * 0.3,
-        W * 0.5,
-        H * 0.5,
-        Math.max(W, H) * 0.82,
-      );
-      vg.addColorStop(0, 'rgba(0,0,0,0)');
-      vg.addColorStop(1, 'rgba(0,0,0,0.5)');
-      ctx.fillStyle = vg;
-      ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(vig, 0, 0);
 
       raf.current = requestAnimationFrame(loop);
     };

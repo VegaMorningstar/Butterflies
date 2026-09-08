@@ -18,6 +18,3 @@ logs/
 /.plugins/
 /.opencode-skills/
 
-# Superseded snapshot of a previous iteration. Kept on disk for reference,
-# but git carries the history now, so it is not part of the published source.
-src/App.v1.tsx
