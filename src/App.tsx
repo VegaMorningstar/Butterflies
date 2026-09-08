@@ -157,6 +157,19 @@ const ALARM_LEAD = 0.6; // s of hard beating before this one actually leaves
 const FLY_UP = 2600; // px risen over the full flight
 const FLY_OUT = 620; // px of lateral spread
 
+// Which way a butterfly leans as it climbs. The bias points it away from the
+// click — left of the cursor goes left, right goes right — so the swarm opens
+// outward from the point that disturbed it rather than drifting one way as a
+// sheet. On top of that each one gets its own random lean, which is what stops
+// neighbours travelling in parallel; without it the fan is geometrically
+// perfect and reads as a machine.
+//
+// SPREAD_RANDOM is deliberately about half the bias, so the outward sense
+// survives while individuals still cross paths.
+const SPREAD_BIAS = 0.75; // how strongly the fan follows "away from the click"
+const SPREAD_RANDOM = 0.7; // per-butterfly lean either side of that
+const RISE_VARY = 0.3; // spread of how high each one climbs (±15%)
+
 // ─── model ────────────────────────────────────────────────────────────────────
 interface B {
   x: number;
@@ -165,7 +178,8 @@ interface B {
   sz: number;
   ph: number; // wing phase
   hover: number; // 0..1 flap amplitude driver
-  spread: number; // lateral direction on release
+  spread: number; // lateral lean, assigned at release — it depends on the click
+  rise: number; // per-butterfly climb multiplier, so they do not move as a sheet
   sway: number; // per-butterfly sway offset
   layer: number; // 0 back .. 2 front; picks the sprite and the draw order
   throw_: number; // how far this one's shadow reaches — reads as height off the field
@@ -550,7 +564,8 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
         band: 0,
         ph: Math.random() * Math.PI * 2,
         hover: 0,
-        spread: (x / W - 0.5) * 2,
+        spread: 0, // set in release(), once the click position is known
+        rise: 1 + (Math.random() - 0.5) * RISE_VARY,
         sway: Math.random() * Math.PI * 2,
         mode: 0,
         hold: 0,
@@ -624,6 +639,12 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       for (const b of bfs.current) {
         b.band = Math.floor(Math.hypot(b.x - ox, b.y - oy) / BAND_PX);
         if (b.band > maxRing) maxRing = b.band;
+
+        // Lean away from the click, clamped so an off-centre click cannot throw
+        // the far side of the screen sideways at double speed, then scattered
+        // per butterfly so neighbours diverge instead of travelling in parallel.
+        const away = Math.max(-1, Math.min(1, (b.x - ox) / (W * 0.5)));
+        b.spread = away * SPREAD_BIAS + (Math.random() - 0.5) * SPREAD_RANDOM;
       }
 
       // The opening rings are the ones worth watching, and at full cadence they
@@ -734,7 +755,7 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
             const t = Math.min(el / FD, 1);
             if (t >= 1) continue;
             const ease = t * t * t;
-            py = b.y - FLY_UP * ease - 46 * t;
+            py = b.y - FLY_UP * b.rise * ease - 46 * t;
             px = b.x + b.spread * FLY_OUT * ease + Math.sin(now * 2.4 + b.sway) * 16 * t;
             rot = b.tilt + b.spread * 0.42 * ease + Math.sin(now * 2.4 + b.sway) * 0.06;
             alpha = 1 - Math.max(0, (t - 0.3) / 0.7) ** 1.4;
