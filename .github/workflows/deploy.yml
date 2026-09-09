@@ -39,7 +39,7 @@ jobs:
 
       - name: Build
         env:
-          FIGMA_PUBLIC_URL: /${{ github.event.repository.name }}
+          PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
         run: pnpm build
 
       - name: Upload artifact
