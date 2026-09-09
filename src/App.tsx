@@ -618,10 +618,36 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       bfs.current = out; // already ordered back layer first
     };
 
-    const dpr = () => Math.min(window.devicePixelRatio || 1, 1.5);
+    // Fill rate is the app's own bottleneck (see README perf notes), and touch
+    // devices tend to have weaker GPUs than desktop ones. A coarse pointer is
+    // the actual signal for that — unlike a viewport-width breakpoint, it
+    // doesn't false-positive on a desktop window resized narrow, and it still
+    // catches a touch device that happens to be wide (a tablet, or a phone in
+    // landscape), so the cap adapts to the device rather than one screen size.
+    const coarsePointerQuery = window.matchMedia?.('(pointer: coarse)') ?? null;
+    let coarsePointer = coarsePointerQuery?.matches ?? false;
+    const onPointerCapabilityChange = (e: MediaQueryListEvent) => {
+      coarsePointer = e.matches;
+    };
+    coarsePointerQuery?.addEventListener('change', onPointerCapabilityChange);
+    const dpr = () => Math.min(window.devicePixelRatio || 1, coarsePointer ? 1.25 : 1.5);
+
+    // iOS Safari fires `resize` when its address bar shows/hides on scroll —
+    // a height-only wobble, not a real layout change. Rebuilding the whole
+    // ~2,500-butterfly grid for that reads as a jank/flicker on iPhone, so a
+    // resize only triggers a rebuild when the width changes or the height
+    // changes by more than that toolbar's own travel.
+    let prevW = 0;
+    let prevH = 0;
     const onResize = () => {
       W = window.innerWidth;
       H = window.innerHeight;
+      const widthChanged = Math.abs(W - prevW) > 1;
+      const majorHeightChange = Math.abs(H - prevH) > 150;
+      const needsRebuild = prevW === 0 || widthChanged || majorHeightChange;
+      prevW = W;
+      prevH = H;
+
       const d = dpr();
       canvas.width = Math.round(W * d);
       canvas.height = Math.round(H * d);
@@ -630,7 +656,7 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       groundRef.current = makeGround(canvas.width, canvas.height);
       vigRef.current = makeVignette(canvas.width, canvas.height);
       if (!glowRef.current) glowRef.current = makeGlow(Math.round(HOVER_R * d));
-      buildGrid();
+      if (needsRebuild) buildGrid();
     };
     onResize();
     window.addEventListener('resize', onResize);
@@ -708,10 +734,41 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       }
     };
 
+    // Touch parity with the mouse: a finger resting or sliding on the field is
+    // the same "hover" signal a cursor gives, so the wing-snap/hold/beat buildup
+    // plays under a finger the same way it does under a cursor, and lifting the
+    // finger releases the field exactly like a click. preventDefault (the
+    // listeners are non-passive for this) stops the page scrolling or
+    // pinch-zooming under the gesture while the field is live.
+    const touchXY = (e: TouchEvent) => {
+      const t = e.touches[0] ?? e.changedTouches[0];
+      return t ? { x: t.clientX, y: t.clientY } : null;
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      const p = touchXY(e);
+      if (p) mouse.current = { x: p.x, y: p.y, seen: true };
+      if (e.cancelable) e.preventDefault();
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const p = touchXY(e);
+      if (p) mouse.current = { x: p.x, y: p.y, seen: true };
+      if (e.cancelable) e.preventDefault();
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const p = touchXY(e);
+      if (p) release(p.x, p.y);
+      onLeave();
+      if (e.cancelable) e.preventDefault();
+    };
+
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseleave', onLeave);
     window.addEventListener('click', onClick);
     window.addEventListener('keydown', onKey);
+    window.addEventListener('touchstart', onTouchStart, { passive: false });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', onLeave);
 
     // ─── animation loop ──────────────────────────────────────────────────────
     let last = performance.now() / 1000;
@@ -878,18 +935,25 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       window.removeEventListener('mouseleave', onLeave);
       window.removeEventListener('click', onClick);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onLeave);
+      coarsePointerQuery?.removeEventListener('change', onPointerCapabilityChange);
     };
   }, []);
 
   return (
-    <div className="fixed inset-0" style={{ background: '#0b0e12' }}>
+    <div className="fixed inset-0" style={{ background: '#0b0e12', touchAction: 'none' }}>
       <canvas ref={cvs} className="absolute inset-0" style={{ display: 'block' }} />
 
       {/* Nothing centred — the field runs edge to edge. Only a quiet cue at the
-          foot of the screen, so the interaction stays discoverable. */}
+          foot of the screen, so the interaction stays discoverable. Padding
+          clears the home-indicator strip on notched iPhones. */}
       <div
-        className="absolute inset-x-0 bottom-8 flex justify-center pointer-events-none select-none"
+        className="absolute inset-x-0 flex justify-center pointer-events-none select-none"
         style={{
+          bottom: 'calc(2rem + env(safe-area-inset-bottom))',
           opacity: released ? 0 : ready ? 1 : 0,
           transition: 'opacity 1.2s ease',
         }}
@@ -906,7 +970,7 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
             textShadow: '0 1px 10px rgba(6, 8, 11, 0.9), 0 0 26px rgba(6, 8, 11, 0.8)',
           }}
         >
-          Click anywhere to release
+          Tap or click anywhere to release
         </span>
       </div>
     </div>
@@ -921,8 +985,8 @@ function MainContent() {
       style={{ background: '#f7f6f3', fontFamily: "'Outfit', sans-serif" }}
     >
       <nav
-        className="fixed top-0 inset-x-0 flex items-center justify-between px-10 py-6"
-        style={{ zIndex: 10 }}
+        className="fixed top-0 inset-x-0 flex items-center justify-between px-5 sm:px-10"
+        style={{ zIndex: 10, paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: '1.5rem' }}
       >
         <span
           style={{
@@ -935,8 +999,10 @@ function MainContent() {
         >
           PIERIS
         </span>
+        {/* These links are placeholders (href="#"), so they're dropped rather
+            than wrapped or hidden behind a menu below the width they fit in. */}
         <div
-          className="flex gap-8"
+          className="hidden sm:flex gap-8"
           style={{
             fontSize: '0.7rem',
             letterSpacing: '0.16em',
@@ -952,7 +1018,7 @@ function MainContent() {
         </div>
       </nav>
 
-      <div className="flex flex-col items-center justify-center min-h-screen text-center px-8 gap-8">
+      <div className="flex flex-col items-center justify-center min-h-screen text-center px-6 sm:px-8 gap-8">
         <p
           style={{
             fontFamily: "'Fraunces', serif",
@@ -982,10 +1048,10 @@ function MainContent() {
           quietest weather there is, and gone the moment you look straight at it.
         </p>
 
-        <div className="flex gap-4 mt-2">
+        <div className="flex flex-wrap justify-center gap-4 mt-2">
           <button
             style={{
-              padding: '0.78rem 2.2rem',
+              padding: '0.78rem clamp(1.3rem, 6vw, 2.2rem)',
               background: '#1f2218',
               border: 'none',
               color: '#eceee6',
@@ -1001,7 +1067,7 @@ function MainContent() {
           </button>
           <button
             style={{
-              padding: '0.78rem 2.2rem',
+              padding: '0.78rem clamp(1.3rem, 6vw, 2.2rem)',
               background: 'transparent',
               border: '1px solid #cbcabf',
               color: '#5b5e55',
@@ -1019,8 +1085,9 @@ function MainContent() {
       </div>
 
       <div
-        className="text-center pb-8"
+        className="text-center px-6"
         style={{
+          paddingBottom: 'max(2rem, env(safe-area-inset-bottom))',
           fontSize: '0.66rem',
           letterSpacing: '0.2em',
           color: '#a6a89c',
