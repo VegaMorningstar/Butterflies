@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "logo": "node scripts/make-logo.mjs",
+    "refs": "node scripts/order-references.mjs",
     "format": "oxfmt"
   },
   "dependencies": {

@@ -49,10 +49,20 @@ export const T = {
  * point of using it here.
  */
 export function chrom(strength = 1) {
-  const o = (1.5 * strength).toFixed(2);
-  const a = Math.min(0.5, 0.42 * strength).toFixed(2);
-  const b = Math.min(0.46, 0.38 * strength).toFixed(2);
-  return `-${o}px 0 rgba(172,54,32,${a}), ${o}px 0 rgba(30,112,124,${b})`;
+  const hard = (1.4 * strength).toFixed(2);
+  const soft = (2.6 * strength).toFixed(2);
+  const blur = (7 * strength).toFixed(2);
+  const red = 'rgba(198,62,30,';
+  const cyan = 'rgba(22,134,158,';
+  // A sharp split for the fringe, plus a wider blurred pass for the bloom. The
+  // two together are what separates a printing misregistration from a plain
+  // offset drop shadow.
+  return [
+    `-${soft}px 0 ${blur}px ${red}${(0.5 * strength).toFixed(2)})`,
+    `${soft}px 0 ${blur}px ${cyan}${(0.46 * strength).toFixed(2)})`,
+    `-${hard}px 0 0 ${red}${(0.42 * strength).toFixed(2)})`,
+    `${hard}px 0 0 ${cyan}${(0.38 * strength).toFixed(2)})`,
+  ].join(', ');
 }
 
 // ─── canvas ───────────────────────────────────────────────────────────────────

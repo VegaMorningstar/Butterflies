@@ -27,6 +27,7 @@ import {
 
 import { DomVsCanvasDemo, FieldCount, FrameDemo } from './demos-arch';
 import { SpriteSpaceDemo, StateMachineDemo, TimelineDemo } from './demos-diagram';
+import { AmbientButterflies } from './ambient';
 
 import {
   Abstract,
@@ -97,13 +98,13 @@ function Chapter({
       <h2
         style={{
           margin: '0 0 0.8rem',
-          fontFamily: T.serif,
-          fontSize: 'clamp(1.7rem, 4.4vw, 2.2rem)',
-          fontWeight: 300,
-          lineHeight: 1.15,
+          fontFamily: T.sans,
+          fontSize: 'clamp(1.6rem, 4.2vw, 2.05rem)',
+          fontWeight: 500,
+          lineHeight: 1.14,
           letterSpacing: '-0.015em',
           color: T.ink,
-          textShadow: chrom(0.8),
+          textShadow: chrom(0.75),
         }}
       >
         {n && (
@@ -164,6 +165,7 @@ export default function Masterclass({ onReplay }: { onReplay: () => void }) {
       }}
     >
       <ChartStock />
+      <AmbientButterflies />
 
       {/* ── bar ── */}
       <header
@@ -350,13 +352,13 @@ export default function Masterclass({ onReplay }: { onReplay: () => void }) {
             <h1
               style={{
                 margin: '0 0 1rem',
-                fontFamily: T.serif,
-                fontSize: 'clamp(2.1rem, 6.4vw, 3.1rem)',
-                fontWeight: 300,
-                lineHeight: 1.08,
-                letterSpacing: '-0.025em',
+                fontFamily: T.sans,
+                fontSize: 'clamp(2.05rem, 6.2vw, 3rem)',
+                fontWeight: 500,
+                lineHeight: 1.07,
+                letterSpacing: '-0.02em',
                 color: T.ink,
-                textShadow: chrom(1.15),
+                textShadow: chrom(1.1),
               }}
             >
               A field of butterflies, and the reasoning underneath it
@@ -487,13 +489,19 @@ export default function Masterclass({ onReplay }: { onReplay: () => void }) {
               being told. The text is for the person who did not move.
             </P>
 
-            <Detail label="Response thresholds" note="the three numbers worth memorising">
+            <Detail label="Response thresholds" note="the numbers worth memorising">
               <P>
                 Around <K>100ms</K> a response reads as instantaneous and the thing you touched feels
                 like an object; by <K>1s</K> the sense of direct manipulation is gone; past{' '}
                 <K>10s</K> attention leaves <Cite k={['card', 'nielsen']} />. Between the first two
                 sits the Doherty threshold at about <K>400ms</K>, past which operators stop feeling
                 in command <Cite k="doherty" />.
+              </P>
+              <P>
+                Those are laboratory numbers from the 1980s and 90s, and it is worth knowing they
+                survived contact with the modern web. Interaction to Next Paint, a Core Web Vital
+                since 2024, measures the same thing in the field and calls 200 milliseconds or less
+                good <Cite k="inp" />. Different instrument, same neighbourhood.
               </P>
               <P>
                 The field answers on the next frame, about 16 milliseconds. That is the reason it
@@ -516,15 +524,31 @@ export default function Masterclass({ onReplay }: { onReplay: () => void }) {
               numbers is a shape you have to look at properly first.
             </P>
 
-            <H3>Pick a real species</H3>
+            <H3>Pick a real one, and pick it for a reason</H3>
             <P>
-              This is a Cabbage White, <Em>Pieris rapae</Em>. It has three features that survive
-              being drawn at a wingspan of about 55 pixels: white plates with almost no pattern, a
-              charcoal smudge at the leading corner of each forewing, and one dark spot per wing.
+              This is a Cabbage White, <Em>Pieris rapae</Em>, and it was not chosen off a list. It
+              is the butterfly I watched from a window in Chicago, and the one I kept finding in the
+              public parks there: unremarkable, everywhere, and completely absorbing once you stop
+              and give it your attention. Watching them was quieting in a way I have not really
+              managed to reproduce since.
             </P>
             <P>
-              Generic shapes read as clip art. A specific one reads as an observation, even to a
-              viewer who cannot name the species. That principle is not about butterflies.
+              That matters more than it sounds. A loading screen asking for a few seconds of
+              somebody&apos;s attention should be made of something that actually held yours. The
+              whole brief in section 1 is about giving a wait some worth, and the surest way to get
+              a thing wrong is to pick it because it was convenient.
+            </P>
+            <P>
+              It also happens to be an excellent subject. Three features survive being drawn at a
+              wingspan of about 55 pixels: white plates with almost no pattern, a charcoal smudge at
+              the leading corner of each forewing, and one dark spot per wing. Generic shapes read as
+              clip art. A specific one reads as an observation, even to a viewer who could not name
+              the species.
+            </P>
+            <P>
+              That principle is not about butterflies. Specificity is legible even when the
+              particular is not, and it usually comes from having looked at something for reasons
+              that had nothing to do with the brief.
             </P>
 
             <AnatomyDemo />
@@ -782,8 +806,16 @@ const lift = -fold * SS * 0.05 * b.sz;
               The twelve principles <Cite k="thomasjohnston" /> are not about cartoons. They are
               observations about how perception assigns intention to moving shapes, which is exactly
               an interface animation&apos;s problem. Lasseter&apos;s account of applying them in code{' '}
-              <Cite k="lasseter" /> is the more directly useful reference once the in-betweens are
-              interpolated by a machine.
+              <Cite k="lasseter" /> is the bridge once the in-betweens are interpolated by a machine.
+            </P>
+            <P>
+              For anyone doing this work now, the more practical successors are Head&apos;s{' '}
+              <Em>Designing Interface Animation</Em> <Cite k="valhead" />, which translates the
+              principles into interface terms rather than character terms, and Nabors&apos;{' '}
+              <Em>Animation at Work</Em> <Cite k="nabors" />, which is good on the prior question of
+              whether a motion earns its place at all. If you want to see the same reasoning arrive
+              as shipped tokens, Material&apos;s motion specification <Cite k="material3" /> states
+              easing and duration in the form these decisions usually reach a team.
             </P>
 
             <EasingDemo />
@@ -996,10 +1028,14 @@ const lift = -fold * SS * 0.05 * b.sz;
                 in series.
               </P>
               <Note kind="watch">
-                This build does not honour <K>prefers-reduced-motion</K> <Cite k="mq5" />. For a full
-                screen of continuous movement that is a real accessibility failure, covered directly
-                by WCAG 2.1 Success Criterion 2.3.3 <Cite k="wcag" />. The skip helps and is not a
-                substitute. The honest fix is a static field with the release available immediately.
+                <K>prefers-reduced-motion</K> <Cite k="mq5" /> is honoured by the butterflies that
+                drift across this page, which render nothing at all when it is set, but{' '}
+                <Em>not</Em> by the loading field itself. For a full screen of continuous movement
+                that is a real accessibility failure, covered directly by WCAG Success Criterion
+                2.3.3 <Cite k="wcag" /> and restated in Apple&apos;s platform guidance on motion{' '}
+                <Cite k="applehig" />. The skip helps and is not a substitute. The honest fix is a
+                static field with the release available immediately, and it is the outstanding item
+                on this build.
               </Note>
             </Detail>
 
