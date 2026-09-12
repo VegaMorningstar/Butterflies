@@ -50,33 +50,36 @@
  * and therefore the frame cost, the most.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+
+import {
+  BASE_SZ,
+  LAYERS,
+  makeBody,
+  makeGlow,
+  makeGround,
+  makeShadow,
+  makeSilhouette,
+  makeVignette,
+  makeWing,
+  SHADOW_ALPHA,
+  SHADOW_BLUR,
+  SHADOW_DX,
+  SHADOW_DY,
+  SS,
+  type Sprite,
+} from './butterfly';
+import { setScenesPaused } from './scenePause';
+
+const Masterclass = lazy(() => import('./masterclass/Masterclass'));
 
 // ─── tuning ───────────────────────────────────────────────────────────────────
-const SS = 150; // sprite canvas size (px) — source resolution, not display size
+// The sprite art, the layer stack and the scene washes live in butterfly.ts.
+// What is left here is behaviour: how the field is laid out, how it answers the
+// cursor, and how the release is choreographed.
 const ROW_RATIO = 0.62; // butterflies are far wider than tall; rows need the room
 const JITTER = 0.62; // grid cell fraction each butterfly may wander — organic, still even
 const TILT = 0.46; // total spread of random rotation (±0.23 rad ≈ ±13°)
-const BASE_SZ = 0.4; // sprite → screen scale (≈55px wingspan)
-
-// Three interleaved fields, back to front. Each is its own jittered grid, so
-// they close each other's gaps and the screen reads as near-solid white at
-// rest — the dark ground only opens up where the cursor folds the wings shut.
-// Depth comes from tone: the back layer sits in shade, the front catches light.
-// The shading stays gentle on purpose. Push it far and a back-layer butterfly
-// goes as dark as the ground, reads as background, and the coverage is wasted.
-interface Layer {
-  gs: number; // column spacing for this field
-  sz: number; // size multiplier — nearer reads bigger
-  dark: number; // shade laid over the sprite
-  light: number; // highlight raked across it from the upper left
-  shadow: boolean; // whether it drops a shadow on the layers behind
-}
-const LAYERS: Layer[] = [
-  { gs: 46, sz: 0.92, dark: 0.26, light: 0, shadow: false },
-  { gs: 50, sz: 1.0, dark: 0.11, light: 0.05, shadow: false },
-  { gs: 56, sz: 1.09, dark: 0, light: 0.18, shadow: true },
-];
 
 const HOVER_R = 235; // cursor influence radius (px) — wide, so the fold opens a real hole in a field this dense
 const RISE = 0.17; // how fast a butterfly wakes up
@@ -151,6 +154,19 @@ const LAG_RAMP = 6; // rings over which hesitation reaches full strength
 // 1 = shipping speed.
 const WAVE_SCALE = 3;
 
+// A second click means "I have seen this, let me in". Cutting straight to the
+// page would throw away the one moment the whole screen exists for, so instead
+// the release clock is run fast and the same choreography plays out compressed.
+// The rate is derived from how much of the release is actually left, so the
+// wait after a skip is the same whether you skip at the start or near the end.
+const SKIP_IN = 0.4; // s of real time the remainder of the release gets
+const SKIP_MAX_RATE = 14; // ceiling, so nothing teleports between two frames
+// Time constant for winding the clock up, in seconds, rather than a per-frame
+// fraction. A per-frame constant would take the same number of frames at any
+// refresh rate, which on a struggling device is most of the time the skip was
+// supposed to save.
+const SKIP_TAU = 0.07;
+
 // A butterfly winds up in two stages, and both are measured backwards from its
 // own launch rather than from the click. That is the whole trick: the wind-up
 // inherits the BL/DL ordering of the departure for free, so the stirring rolls
@@ -204,331 +220,6 @@ interface B {
   fStart: number;
 }
 
-// ─── sprites ──────────────────────────────────────────────────────────────────
-// Paths are authored in a 150px "sprite space" centred on the butterfly, but
-// each sprite renders into a canvas cropped to its real bounds — at this density
-// the transparent margin would otherwise dominate the per-frame fill cost.
-interface Sprite {
-  c: HTMLCanvasElement;
-  ox: number; // offset from the butterfly centre to the canvas top-left
-  oy: number;
-}
-
-const WING_BOX = { x: 3, y: 36, w: 144, h: 91 };
-const BODY_BOX = { x: 62, y: 24, w: 26, h: 90 }; // y must clear the antennae at 27
-
-// Light comes from the upper left, so shadows fall down and to the right. The
-// field is drawn bottom row up and right to left, which puts every neighbour a
-// shadow lands on already on the canvas.
-const SHADOW_BOX = { x: 0, y: 24, w: 150, h: 116 };
-const SHADOW_DX = 11; // the drop shadow the front layer casts on the ones behind
-const SHADOW_DY = 15;
-const SHADOW_BLUR = 9;
-const SHADOW_ALPHA = 0.5;
-
-function cropped(box: { x: number; y: number; w: number; h: number }) {
-  const c = document.createElement('canvas');
-  c.width = box.w;
-  c.height = box.h;
-  const ctx = c.getContext('2d')!;
-  ctx.translate(-box.x, -box.y); // draw in sprite space, land inside the crop
-  return { c, ctx };
-}
-
-const cx = SS / 2;
-const cy = SS * 0.5;
-const wr = SS * 0.43; // half wingspan
-const wh = SS * 0.4; // vertical extent
-
-// The right-hand wing pair, mirrored at draw time.
-// Cabbage White: white plates, a charcoal apex corner, one dark spot per forewing.
-function wingPaths() {
-  // hindwing — broad and tucked under; its inner edge hugs the axis
-  const hw = new Path2D();
-  hw.moveTo(cx, cy - wh * 0.1);
-  hw.bezierCurveTo(cx + wr * 0.34, cy + wh * 0.04, cx + wr * 0.7, cy + wh * 0.22, cx + wr * 0.72, cy + wh * 0.46);
-  hw.bezierCurveTo(cx + wr * 0.74, cy + wh * 0.68, cx + wr * 0.5, cy + wh * 0.82, cx + wr * 0.22, cy + wh * 0.8);
-  hw.bezierCurveTo(cx + wr * 0.1, cy + wh * 0.79, cx + wr * 0.02, cy + wh * 0.62, cx, cy + wh * 0.26);
-  hw.closePath();
-
-  // forewing — rounded triangle: gentle leading edge to the apex, then a
-  // near-vertical outer margin so it stays wide at the tornus instead of pinching
-  const fw = new Path2D();
-  fw.moveTo(cx, cy - wh * 0.5);
-  fw.bezierCurveTo(cx + wr * 0.36, cy - wh * 0.56, cx + wr * 0.74, cy - wh * 0.6, cx + wr * 1.02, cy - wh * 0.52);
-  fw.bezierCurveTo(cx + wr * 1.09, cy - wh * 0.3, cx + wr * 1.0, cy - wh * 0.04, cx + wr * 0.84, cy + wh * 0.14);
-  fw.bezierCurveTo(cx + wr * 0.56, cy + wh * 0.22, cx + wr * 0.24, cy + wh * 0.14, cx, cy - wh * 0.02);
-  fw.closePath();
-
-  return { fw, hw };
-}
-
-// Flat black silhouette of the whole butterfly. It has to cover both wings:
-// the shadow is offset horizontally, and a mirrored half-sprite would flip that
-// offset along with it.
-function makeSilhouette(): HTMLCanvasElement {
-  const half = document.createElement('canvas');
-  half.width = SS;
-  half.height = SS;
-  const hctx = half.getContext('2d')!;
-  const { fw, hw } = wingPaths();
-  hctx.fillStyle = '#000';
-  hctx.fill(hw);
-  hctx.fill(fw);
-
-  const c = document.createElement('canvas');
-  c.width = SS;
-  c.height = SS;
-  const ctx = c.getContext('2d')!;
-  ctx.drawImage(half, 0, 0);
-  ctx.translate(SS, 0); // mirror about cx, which sits at SS / 2
-  ctx.scale(-1, 1);
-  ctx.drawImage(half, 0, 0);
-  return c;
-}
-
-function makeShadow(sil: HTMLCanvasElement, blur: number): Sprite {
-  const { c, ctx } = cropped(SHADOW_BOX);
-  ctx.filter = 'blur(' + blur + 'px)';
-  ctx.drawImage(sil, 0, 0);
-  return { c, ox: SHADOW_BOX.x - SS / 2, oy: SHADOW_BOX.y - SS / 2 };
-}
-
-// Shade or rake light across what has already been drawn. source-atop keeps it
-// inside the wing silhouette, so the tint never leaks onto the ground.
-function tint(ctx: CanvasRenderingContext2D, cfg: Layer) {
-  ctx.save();
-  ctx.globalCompositeOperation = 'source-atop';
-  if (cfg.dark > 0) {
-    ctx.fillStyle = 'rgba(15, 20, 27, ' + cfg.dark + ')';
-    ctx.fillRect(0, 0, SS, SS);
-  }
-  if (cfg.light > 0) {
-    const g = ctx.createLinearGradient(cx - SS * 0.3, cy - SS * 0.3, cx + SS * 0.34, cy + SS * 0.3);
-    g.addColorStop(0, 'rgba(255, 255, 255, ' + cfg.light + ')');
-    g.addColorStop(0.55, 'rgba(255, 255, 255, ' + cfg.light * 0.3 + ')');
-    g.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, SS, SS);
-  }
-  ctx.restore();
-}
-
-function makeWing(cfg: Layer): Sprite {
-  const half = document.createElement('canvas');
-  half.width = SS;
-  half.height = SS;
-  const ctx = half.getContext('2d')!;
-  const { fw, hw } = wingPaths();
-
-  // ── hindwing ───────────────────────────────────────────────────────────────
-  const hg = ctx.createRadialGradient(cx, cy + wh * 0.06, SS * 0.008, cx, cy + wh * 0.06, wr * 0.72);
-  hg.addColorStop(0.0, '#dee3e7');
-  hg.addColorStop(0.2, '#f4f7f9');
-  hg.addColorStop(0.45, '#ffffff');
-  hg.addColorStop(1.0, '#ffffff');
-  ctx.fillStyle = hg;
-  ctx.fill(hw);
-
-  ctx.save();
-  ctx.clip(hw);
-  ctx.strokeStyle = 'rgba(150, 156, 162, 0.22)';
-  ctx.lineWidth = 0.7;
-  for (const a of [0, 0.5, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy + wh * 0.02);
-    ctx.quadraticCurveTo(
-      cx + wr * 0.32,
-      cy + wh * (0.3 + a * 0.24),
-      cx + wr * (0.6 - a * 0.34),
-      cy + wh * (0.42 + a * 0.34),
-    );
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  ctx.strokeStyle = 'rgba(74, 78, 85, 0.32)';
-  ctx.lineWidth = 0.95;
-  ctx.stroke(hw);
-
-  // ── forewing ───────────────────────────────────────────────────────────────
-  const fg = ctx.createRadialGradient(cx, cy - wh * 0.3, SS * 0.008, cx, cy - wh * 0.3, wr * 0.86);
-  fg.addColorStop(0.0, '#dfe4e8');
-  fg.addColorStop(0.18, '#f6f8fa');
-  fg.addColorStop(0.4, '#ffffff');
-  fg.addColorStop(1.0, '#ffffff');
-  ctx.fillStyle = fg;
-  ctx.fill(fw);
-
-  ctx.save();
-  ctx.clip(fw);
-
-  // charcoal apex — a defined dark corner, not a wash
-  const ax = cx + wr * 1.02;
-  const ay = cy - wh * 0.5;
-  const ap = ctx.createRadialGradient(ax, ay, SS * 0.004, ax, ay, wr * 0.32);
-  ap.addColorStop(0.0, 'rgba(48, 49, 54, 0.94)');
-  ap.addColorStop(0.34, 'rgba(58, 60, 66, 0.78)');
-  ap.addColorStop(0.62, 'rgba(88, 92, 99, 0.26)');
-  ap.addColorStop(1.0, 'rgba(120, 124, 130, 0)');
-  ctx.fillStyle = ap;
-  ctx.fillRect(0, 0, SS, SS);
-
-  // faint dusting along the outer margin below the apex
-  const om = ctx.createLinearGradient(cx + wr * 1.06, cy, cx + wr * 0.62, cy);
-  om.addColorStop(0.0, 'rgba(84, 88, 95, 0.34)');
-  om.addColorStop(1.0, 'rgba(120, 124, 130, 0)');
-  ctx.fillStyle = om;
-  ctx.fillRect(0, cy - wh * 0.2, SS, wh * 0.42);
-
-  // veins
-  ctx.strokeStyle = 'rgba(150, 156, 162, 0.22)';
-  ctx.lineWidth = 0.7;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - wh * 0.46);
-  ctx.quadraticCurveTo(cx + wr * 0.46, cy - wh * 0.5, cx + wr * 0.9, cy - wh * 0.4);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - wh * 0.32);
-  ctx.quadraticCurveTo(cx + wr * 0.48, cy - wh * 0.28, cx + wr * 0.9, cy - wh * 0.1);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - wh * 0.16);
-  ctx.quadraticCurveTo(cx + wr * 0.42, cy - wh * 0.04, cx + wr * 0.78, cy + wh * 0.1);
-  ctx.stroke();
-
-  // the single dark spot — one per top wing
-  const sx = cx + wr * 0.58;
-  const sy = cy - wh * 0.14;
-  const sr = SS * 0.026;
-  const sg = ctx.createRadialGradient(sx, sy, sr * 0.2, sx, sy, sr);
-  sg.addColorStop(0.0, 'rgba(42, 43, 47, 0.95)');
-  sg.addColorStop(0.62, 'rgba(50, 52, 57, 0.88)');
-  sg.addColorStop(1.0, 'rgba(78, 81, 88, 0)');
-  ctx.fillStyle = sg;
-  ctx.beginPath();
-  ctx.ellipse(sx, sy, sr, sr * 0.88, -0.24, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.restore();
-
-  ctx.strokeStyle = 'rgba(74, 78, 85, 0.38)';
-  ctx.lineWidth = 1;
-  ctx.stroke(fw);
-
-  const { c, ctx: out } = cropped(WING_BOX);
-  out.drawImage(half, 0, 0);
-  out.save();
-  out.translate(SS, 0); // mirror about cx, which sits at SS / 2
-  out.scale(-1, 1);
-  out.drawImage(half, 0, 0);
-  out.restore();
-  tint(out, cfg); // after composing, or the seam at the axis tints twice
-
-  return { c, ox: WING_BOX.x - SS / 2, oy: WING_BOX.y - SS / 2 };
-}
-
-// Deliberately soft: a suggestion of a thorax rather than a black bar.
-function makeBody(cfg: Layer): Sprite {
-  const { c, ctx } = cropped(BODY_BOX);
-
-  // soft halo so the body reads as fuzzy, not as a hard stroke
-  const halo = ctx.createRadialGradient(cx, cy + wh * 0.06, SS * 0.005, cx, cy + wh * 0.06, SS * 0.055);
-  halo.addColorStop(0.0, 'rgba(142, 148, 155, 0.24)');
-  halo.addColorStop(1.0, 'rgba(142, 148, 155, 0)');
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + wh * 0.06, SS * 0.03, wh * 0.56, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // thorax, then a tapering abdomen
-  const bg = ctx.createLinearGradient(cx, cy - wh * 0.52, cx, cy + wh * 0.66);
-  bg.addColorStop(0.0, 'rgba(126, 132, 140, 0.58)');
-  bg.addColorStop(0.38, 'rgba(108, 114, 122, 0.5)');
-  bg.addColorStop(1.0, 'rgba(130, 136, 143, 0.16)');
-  ctx.fillStyle = bg;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy - wh * 0.24, SS * 0.019, wh * 0.24, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + wh * 0.22, SS * 0.013, wh * 0.42, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // head
-  ctx.fillStyle = 'rgba(116, 122, 130, 0.5)';
-  ctx.beginPath();
-  ctx.arc(cx, cy - wh * 0.5, SS * 0.017, 0, Math.PI * 2);
-  ctx.fill();
-
-  // antennae — short, pale and thin; they should barely register
-  ctx.strokeStyle = 'rgba(150, 156, 163, 0.34)';
-  ctx.lineWidth = 0.8;
-  for (const side of [-1, 1]) {
-    const X = (v: number) => cx + side * v;
-    ctx.beginPath();
-    ctx.moveTo(X(SS * 0.007), cy - wh * 0.54);
-    ctx.quadraticCurveTo(X(SS * 0.046), cy - wh * 0.68, X(SS * 0.064), cy - wh * 0.8);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(150, 156, 163, 0.34)';
-    ctx.beginPath();
-    ctx.ellipse(X(SS * 0.064), cy - wh * 0.8, SS * 0.009, SS * 0.006, side * 0.6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  tint(ctx, cfg);
-  return { c, ox: BODY_BOX.x - SS / 2, oy: BODY_BOX.y - SS / 2 };
-}
-
-
-// The ground, the vignette and the cursor glow are fixed images that only
-// change when the window does. Evaluating three gradients across the whole
-// canvas every frame costs more than the butterflies in the top layer; baking
-// them once and blitting turns per-pixel gradient maths into a copy.
-// All three are built at device resolution and blitted under an identity
-// transform, so nothing is resampled.
-function makeWash(w: number, h: number, paint: (c: CanvasRenderingContext2D) => void) {
-  const c = document.createElement('canvas');
-  c.width = Math.max(1, w);
-  c.height = Math.max(1, h);
-  paint(c.getContext('2d')!);
-  return c;
-}
-
-function makeGround(w: number, h: number) {
-  return makeWash(w, h, ctx => {
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#101418');
-    g.addColorStop(0.55, '#0b0e12');
-    g.addColorStop(1, '#080a0d');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-  });
-}
-
-function makeVignette(w: number, h: number) {
-  return makeWash(w, h, ctx => {
-    const g = ctx.createRadialGradient(
-      w * 0.5, h * 0.5, Math.min(w, h) * 0.3,
-      w * 0.5, h * 0.5, Math.max(w, h) * 0.82,
-    );
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,0.5)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-  });
-}
-
-function makeGlow(r: number) {
-  return makeWash(r * 2, r * 2, ctx => {
-    const g = ctx.createRadialGradient(r, r, 0, r, r, r * 0.95);
-    g.addColorStop(0.0, 'rgba(222, 234, 244, 0.075)');
-    g.addColorStop(0.5, 'rgba(190, 212, 230, 0.026)');
-    g.addColorStop(1.0, 'rgba(160, 190, 214, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, r * 2, r * 2);
-  });
-}
-
 // ─── loading screen ───────────────────────────────────────────────────────────
 function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
   const cvs = useRef<HTMLCanvasElement>(null);
@@ -539,7 +230,9 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
   const groundRef = useRef<HTMLCanvasElement | null>(null);
   const vigRef = useRef<HTMLCanvasElement | null>(null);
   const glowRef = useRef<HTMLCanvasElement | null>(null);
-  const stage = useRef<'idle' | 'fly'>('idle');
+  // idle: the field is up. fly: the release is running. done: the reveal has
+  // been handed to the page underneath, and this screen stops claiming input.
+  const stage = useRef<'idle' | 'fly' | 'done'>('idle');
   const mouse = useRef({ x: -9999, y: -9999, seen: false });
   const raf = useRef(0);
   const revealed = useRef(onRevealed);
@@ -668,11 +361,21 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       mouse.current = { x: -9999, y: -9999, seen: false };
     };
 
+    // The release is scheduled against `clock`, a virtual second count that
+    // normally advances in step with real time. Skipping speeds that clock up,
+    // which compresses the launch schedule, the flights and the wing beats
+    // together, because all three are expressed in the same currency.
+    let clock = 0;
+    let rate = 1;
+    let rateTarget = 1;
+    let revealAt = Infinity;
+    let lastLaunchAt = Infinity; // virtual time the final butterfly leaves
+
     const release = (ox: number, oy: number) => {
       if (stage.current !== 'idle') return;
       stage.current = 'fly';
       setReleased(true);
-      const t0 = performance.now() / 1000;
+      const t0 = clock;
       const back = LAYERS.length - 1;
 
       let maxRing = 0;
@@ -723,14 +426,42 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
         if (delay > maxDelay) maxDelay = delay;
       }
       maxDelay += BAND_JITTER;
-      window.setTimeout(() => revealed.current(), Math.round((maxDelay + FD * 0.66) * 1000));
+      // Scheduled on the virtual clock rather than a timeout, so that speeding
+      // the clock up brings the handoff forward with everything else.
+      lastLaunchAt = t0 + maxDelay;
+      revealAt = lastLaunchAt + FD * 0.66;
     };
 
-    const onClick = (e: MouseEvent) => release(e.clientX, e.clientY);
+    /**
+     * Second press: run the rest of the release fast.
+     *
+     * Two things change. The clock speeds up by whatever factor clears the
+     * remaining launches inside SKIP_IN, and the handoff stops waiting for the
+     * flight tail. Anything still airborne finishes over the top of the page
+     * during the crossfade, which is the same overlap the unhurried version
+     * uses, just with more of it.
+     */
+    const skip = () => {
+      if (stage.current !== 'fly' || rateTarget > 1) return;
+      const remaining = Math.max(0, lastLaunchAt - clock);
+      rateTarget = Math.min(SKIP_MAX_RATE, Math.max(1, remaining / SKIP_IN));
+      revealAt = lastLaunchAt;
+    };
+
+    /** First press releases the field, any press after that skips ahead. */
+    const advance = (x: number, y: number) => {
+      if (stage.current === 'idle') release(x, y);
+      else skip();
+    };
+
+    const onClick = (e: MouseEvent) => advance(e.clientX, e.clientY);
     const onKey = (e: KeyboardEvent) => {
+      // Once the reveal has been handed over, the page underneath owns the
+      // keyboard again, so Space must go back to activating the focused button.
+      if (stage.current === 'done') return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        release(mouse.current.seen ? mouse.current.x : W / 2, mouse.current.seen ? mouse.current.y : H / 2);
+        advance(mouse.current.seen ? mouse.current.x : W / 2, mouse.current.seen ? mouse.current.y : H / 2);
       }
     };
 
@@ -740,23 +471,32 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
     // finger releases the field exactly like a click. preventDefault (the
     // listeners are non-passive for this) stops the page scrolling or
     // pinch-zooming under the gesture while the field is live.
+    //
+    // They keep running through the release so a second tap can skip it, then
+    // bail at 'done'. That last guard is load bearing: these are window
+    // listeners, so they outlive the screen being visible, and a preventDefault
+    // on touchend suppresses the click the browser would otherwise synthesise.
+    // Left running, they silently swallow every tap on the revealed page.
     const touchXY = (e: TouchEvent) => {
       const t = e.touches[0] ?? e.changedTouches[0];
       return t ? { x: t.clientX, y: t.clientY } : null;
     };
     const onTouchStart = (e: TouchEvent) => {
+      if (stage.current === 'done') return;
       const p = touchXY(e);
-      if (p) mouse.current = { x: p.x, y: p.y, seen: true };
+      if (p && stage.current === 'idle') mouse.current = { x: p.x, y: p.y, seen: true };
       if (e.cancelable) e.preventDefault();
     };
     const onTouchMove = (e: TouchEvent) => {
+      if (stage.current !== 'idle') return;
       const p = touchXY(e);
       if (p) mouse.current = { x: p.x, y: p.y, seen: true };
       if (e.cancelable) e.preventDefault();
     };
     const onTouchEnd = (e: TouchEvent) => {
+      if (stage.current === 'done') return;
       const p = touchXY(e);
-      if (p) release(p.x, p.y);
+      if (p) advance(p.x, p.y);
       onLeave();
       if (e.cancelable) e.preventDefault();
     };
@@ -781,9 +521,37 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
       if (!canvasEl || !wings.length || !bodies.length || !deep) return;
 
       const ctx = canvasEl.getContext('2d')!;
-      const now = performance.now() / 1000;
-      const dt = Math.min(now - last, 0.05);
-      last = now;
+      const real = performance.now() / 1000;
+      const elapsed = real - last;
+      last = real;
+
+      // Ease into the skip rate instead of switching to it. A step change in
+      // velocity across one frame reads as a glitch; a short wind-up reads as
+      // the swarm being hurried. Exponential in elapsed time, so the wind-up
+      // lasts about the same fifth of a second whatever the frame rate is.
+      rate += (rateTarget - rate) * (1 - Math.exp(-elapsed / SKIP_TAU));
+
+      // Two clamps, because two different things are being protected.
+      //
+      // `dt` drives the per-butterfly integration, which goes unstable if a
+      // single step is large, so it is held to 50ms.
+      //
+      // `clock` carries the release schedule, and must keep real-time pace
+      // instead. Clamping it as hard as `dt` would mean that any device unable
+      // to hold 20fps also had to wait proportionally longer for the field to
+      // clear, which is precisely backwards for a loading screen. A looser
+      // bound still stops a backgrounded tab from teleporting on its first
+      // frame back, since that gap is measured in seconds rather than frames.
+      const dt = Math.min(elapsed, 0.05) * rate;
+      clock += Math.min(elapsed, 0.25) * rate;
+      const now = clock;
+
+      // The handoff rides the same clock, so skipping brings it forward too.
+      if (stage.current === 'fly' && clock >= revealAt) {
+        stage.current = 'done';
+        revealAt = Infinity;
+        revealed.current();
+      }
 
       const d = dpr();
       const ground = groundRef.current;
@@ -797,7 +565,11 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
 
       // Every butterfly transform is written straight into setTransform below,
       // so the device scale is folded in here rather than left on the context.
-      const flying = stage.current === 'fly';
+      //
+      // Not `=== 'fly'`: the stage flips to 'done' the moment the reveal is
+      // handed over, but this screen stays mounted and visible for the length of
+      // the crossfade. Anything still in the air has to keep flying.
+      const flying = stage.current !== 'idle';
       const shadowLayer = LAYERS.map(l => l.shadow);
       const cull = 120; // px of slack before an off-screen butterfly is skipped
       const mx = mouse.current.x;
@@ -977,162 +749,80 @@ function LoadingScreen({ onRevealed }: { onRevealed: () => void }) {
   );
 }
 
-// ─── revealed content ─────────────────────────────────────────────────────────
-function MainContent() {
-  return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: '#f7f6f3', fontFamily: "'Outfit', sans-serif" }}
-    >
-      <nav
-        className="fixed top-0 inset-x-0 flex items-center justify-between px-5 sm:px-10"
-        style={{ zIndex: 10, paddingTop: 'max(1.5rem, env(safe-area-inset-top))', paddingBottom: '1.5rem' }}
-      >
-        <span
-          style={{
-            fontFamily: "'Fraunces', serif",
-            fontSize: '1.05rem',
-            color: '#1c1e1b',
-            fontWeight: 300,
-            letterSpacing: '0.16em',
-          }}
-        >
-          PIERIS
-        </span>
-        {/* These links are placeholders (href="#"), so they're dropped rather
-            than wrapped or hidden behind a menu below the width they fit in. */}
-        <div
-          className="hidden sm:flex gap-8"
-          style={{
-            fontSize: '0.7rem',
-            letterSpacing: '0.16em',
-            color: '#6c6f68',
-            textTransform: 'uppercase',
-          }}
-        >
-          {['Field notes', 'Species', 'Journal', 'About'].map(l => (
-            <a key={l} href="#" style={{ textDecoration: 'none', color: 'inherit' }}>
-              {l}
-            </a>
-          ))}
-        </div>
-      </nav>
-
-      <div className="flex flex-col items-center justify-center min-h-screen text-center px-6 sm:px-8 gap-8">
-        <p
-          style={{
-            fontFamily: "'Fraunces', serif",
-            fontSize: 'clamp(2.6rem, 6.6vw, 6.2rem)',
-            fontWeight: 300,
-            color: '#17190f',
-            lineHeight: 1.1,
-            letterSpacing: '-0.02em',
-            maxWidth: '18ch',
-          }}
-        >
-          Where wings
-          <br />
-          <em style={{ fontStyle: 'italic' }}>become</em> wind.
-        </p>
-
-        <p
-          style={{
-            color: '#61645b',
-            fontSize: '0.98rem',
-            lineHeight: 1.8,
-            maxWidth: '40ch',
-            fontWeight: 300,
-          }}
-        >
-          Two hundred small white wings, opening and closing over a hedgerow — the
-          quietest weather there is, and gone the moment you look straight at it.
-        </p>
-
-        <div className="flex flex-wrap justify-center gap-4 mt-2">
-          <button
-            style={{
-              padding: '0.78rem clamp(1.3rem, 6vw, 2.2rem)',
-              background: '#1f2218',
-              border: 'none',
-              color: '#eceee6',
-              borderRadius: '100px',
-              fontSize: '0.73rem',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              cursor: 'pointer',
-              fontFamily: "'Outfit', sans-serif",
-            }}
-          >
-            Enter the field
-          </button>
-          <button
-            style={{
-              padding: '0.78rem clamp(1.3rem, 6vw, 2.2rem)',
-              background: 'transparent',
-              border: '1px solid #cbcabf',
-              color: '#5b5e55',
-              borderRadius: '100px',
-              fontSize: '0.73rem',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              cursor: 'pointer',
-              fontFamily: "'Outfit', sans-serif",
-            }}
-          >
-            Learn more
-          </button>
-        </div>
-      </div>
-
-      <div
-        className="text-center px-6"
-        style={{
-          paddingBottom: 'max(2rem, env(safe-area-inset-bottom))',
-          fontSize: '0.66rem',
-          letterSpacing: '0.2em',
-          color: '#a6a89c',
-          textTransform: 'uppercase',
-        }}
-      >
-        Pieris rapae · Hedgerow and headland · Temperate
-      </div>
-    </div>
-  );
-}
 
 // ─── root ─────────────────────────────────────────────────────────────────────
+// The field is the front door and the walkthrough is the building. Releasing
+// the butterflies is what opens it.
+//
+// The course is a lazy chunk, and the import below is fired on mount rather
+// than at render time, so it downloads while the field is still up. That makes
+// the loading screen honest: by the time anyone releases it, the thing it was
+// covering has actually arrived.
 export default function App() {
-  const [phase, setPhase] = useState<'load' | 'fade' | 'done'>('load');
+  const startRevealed = () => window.location.hash.length > 1;
+
+  const [phase, setPhase] = useState<'load' | 'fade' | 'done'>(() =>
+    startRevealed() ? 'done' : 'load',
+  );
+  // Kept mounted once shown, so replaying the field does not throw away scroll
+  // position or the state of any figure.
+  const [shown, setShown] = useState(startRevealed);
+  const [run, setRun] = useState(0);
+
+  useEffect(() => {
+    void import('./masterclass/Masterclass');
+  }, []);
+
+  // The course's figures each run their own loop. Park them while the field
+  // has the frame budget, and stop the page scrolling behind the field.
+  useEffect(() => {
+    setScenesPaused(phase === 'load');
+    document.body.style.overflow = phase === 'load' ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [phase]);
+
+  const replay = () => {
+    setRun(r => r + 1);
+    setPhase('load');
+  };
 
   return (
-    <div className="size-full">
+    <>
       <div
-        className="fixed inset-0"
         style={{
           opacity: phase === 'load' ? 0 : 1,
           transition: 'opacity 1.1s ease 0.1s',
-          zIndex: 1,
         }}
       >
-        <MainContent />
+        {shown && (
+          <Suspense fallback={null}>
+            <Masterclass onReplay={replay} />
+          </Suspense>
+        )}
       </div>
 
-      <div
-        className="fixed inset-0"
-        style={{
-          opacity: phase === 'done' ? 0 : 1,
-          transition: 'opacity 0.9s ease',
-          pointerEvents: phase === 'done' ? 'none' : 'auto',
-          zIndex: 10,
-        }}
-      >
-        <LoadingScreen
-          onRevealed={() => {
-            setPhase('fade');
-            window.setTimeout(() => setPhase('done'), 940);
+      {phase !== 'done' && (
+        <div
+          className="fixed inset-0"
+          style={{
+            opacity: phase === 'fade' ? 0 : 1,
+            transition: 'opacity 0.9s ease',
+            pointerEvents: phase === 'fade' ? 'none' : 'auto',
+            zIndex: 10,
           }}
-        />
-      </div>
-    </div>
+        >
+          <LoadingScreen
+            key={run}
+            onRevealed={() => {
+              setShown(true);
+              setPhase('fade');
+              window.setTimeout(() => setPhase('done'), 940);
+            }}
+          />
+        </div>
+      )}
+    </>
   );
 }

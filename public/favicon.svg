@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<defs>
+<radialGradient id="w" cx="50%" cy="42%" r="62%">
+<stop offset="0" stop-color="#dfe4e8"/>
+<stop offset=".42" stop-color="#f8fafb"/>
+<stop offset="1" stop-color="#fff"/>
+</radialGradient>
+<radialGradient id="a" gradientUnits="userSpaceOnUse" cx="140.79" cy="45" r="21.93">
+<stop offset="0" stop-color="#2f3136" stop-opacity=".95"/>
+<stop offset=".5" stop-color="#3d4046" stop-opacity=".55"/>
+<stop offset="1" stop-color="#787c82" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="s" gradientUnits="userSpaceOnUse" cx="112.41" cy="66.6" r="3.9">
+<stop offset="0" stop-color="#2a2b2f"/>
+<stop offset=".62" stop-color="#32343a" stop-opacity=".9"/>
+<stop offset="1" stop-color="#4e5158" stop-opacity="0"/>
+</radialGradient>
+<clipPath id="fw"><path d="M75 45C98.22 41.4 122.73 39 140.79 43.8C145.31 57 139.5 72.6 129.18 83.4C111.12 88.2 90.48 83.4 75 73.8Z"/></clipPath>
+</defs>
+<rect width="100" height="100" rx="22" fill="#0b0e12"/>
+<g transform="translate(2.08 2.28) scale(0.64)">
+<g id="h">
+<path d="M75 69C96.93 77.4 120.15 88.2 121.44 102.6C122.73 115.8 107.25 124.2 89.19 123C81.45 122.4 76.29 112.2 75 90.6Z" fill="url(#w)" stroke="#4a4e55" stroke-opacity=".3" stroke-width="1"/>
+<path d="M75 45C98.22 41.4 122.73 39 140.79 43.8C145.31 57 139.5 72.6 129.18 83.4C111.12 88.2 90.48 83.4 75 73.8Z" fill="url(#w)" stroke="#4a4e55" stroke-opacity=".36" stroke-width="1"/>
+<g clip-path="url(#fw)"><rect x="0" y="0" width="150" height="150" fill="url(#a)"/></g>
+<ellipse cx="112.41" cy="66.6" rx="3.9" ry="3.43" transform="rotate(-14 112.41 66.6)" fill="url(#s)"/>
+</g>
+<use href="#h" transform="translate(150 0) scale(-1 1)"/>
+<path d="M75 43.8c2.6 0 3.4 2.4 3.4 6.2 0 9.4-1.5 22-3.4 26.6-1.9-4.6-3.4-17.2-3.4-26.6 0-3.8.8-6.2 3.4-6.2Z" fill="#7b818a" fill-opacity=".72"/>
+<circle cx="75" cy="45" r="2.85" fill="#7b818a" fill-opacity=".8"/>
+<g stroke="#9aa0a8" stroke-opacity=".62" stroke-width="1.5" fill="none" stroke-linecap="round">
+<path d="M73.95 42.6Q68.1 34.2 65.4 27"/>
+<path d="M76.05 42.6Q81.9 34.2 84.6 27"/>
+</g>
+</g>
+</svg>

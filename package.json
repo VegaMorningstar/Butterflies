@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "logo": "node scripts/make-logo.mjs",
     "format": "oxfmt"
   },
   "dependencies": {

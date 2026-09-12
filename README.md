@@ -7,6 +7,40 @@ underneath.
 Built with React 19, Vite and Tailwind CSS v4. All of the animation is a single
 2D canvas — there is no DOM element per butterfly.
 
+## What is underneath
+
+Releasing the field reveals **How this was built**, a long-form interactive
+walkthrough of the loading screen itself, in thirteen chapters: the UX reasoning
+behind the wait, why this is canvas and not DOM, the bezier construction of the
+butterfly, sprite baking, field placement, the flap, the input response, the
+motion principles, the release choreography, the anatomy of a single frame, and
+the device work.
+
+All twelve of its figures are live and wired to the real sprite code in
+[`src/butterfly.ts`](src/butterfly.ts), so nothing in the walkthrough can drift
+away from the thing it describes. Four of them measure rather than assert: DOM
+against canvas, path rendering against baked sprites, the per-stage cost of one
+frame, and the head count for whatever screen you are on.
+
+It lives in [`src/masterclass/`](src/masterclass/) and is a separate chunk whose
+download starts as soon as the field appears, so the wait covers a real arrival
+rather than performing one. The `↺` in its header puts the butterflies back.
+
+Any hash in the URL (`#release`, say) skips the field and lands on that chapter,
+so individual chapters stay linkable.
+
+## The mark
+
+[`public/favicon.svg`](public/favicon.svg) is the Cabbage White on the same
+near-black the field sits on. It is not redrawn by hand: `scripts/make-logo.mjs`
+reads `FOREWING` and `HINDWING` out of [`src/butterfly.ts`](src/butterfly.ts),
+converts the same control points into SVG path data, and rebuilds the file. So
+the logo and the butterflies on screen are the same shape by construction.
+
+```bash
+pnpm logo   # after changing the wing outline
+```
+
 ## Running it
 
 The project's toolchain is pinned in `.mise.toml` (Node 22, pnpm).
@@ -130,9 +164,19 @@ If it feels heavy on lower-end hardware, `ROW_RATIO` is the single cheapest dial
 ## Project layout
 
 ```
-src/App.tsx      the whole thing: sprites, field, animation loop, revealed page
-src/main.tsx     React entry point
-src/index.css    Tailwind import and global font wiring
-index.html       Vite shell
-vite.config.ts   React + Tailwind v4 plugins, "@" alias for src/
+src/App.tsx           field, animation loop, interaction, reveal sequencing
+src/butterfly.ts      the art: wing paths, sprite baking, scene washes
+src/scenePause.ts     parks the walkthrough's loops while the field is up
+public/favicon.svg    the mark, generated (see below)
+scripts/make-logo.mjs regenerates the mark from the wing geometry
+src/masterclass/      the "How this was built" walkthrough (lazy loaded)
+  Masterclass.tsx     chapters and prose
+  demos.tsx           the art, field and motion figures
+  demos-arch.tsx      DOM vs canvas, frame anatomy, live head count
+  field.ts            field building shared by the figures
+  kit.tsx             canvas hooks, controls, typographic pieces
+src/main.tsx          React entry point
+src/index.css         Tailwind import and global resets
+index.html            Vite shell, metadata, font links
+vite.config.ts        React + Tailwind v4 plugins, "@" alias for src/
 ```
